@@ -23,6 +23,7 @@ ARENA_SECONDARY_COLOR = "#2c2c2c"
 MESSAGE_COLOR = "#808080"
 # Color of the grid, also used for footer hint text.
 GRID_COLOR = "#3c3c3b"
+HUNGER_COLOR = "#ffaa00"  # Color of the hunger bar (orange/yellow).
 
 # Game over screen colors
 GAME_OVER_MESSAGE_COLOR = (128, 128, 128)  # Gray for game over message
@@ -38,6 +39,7 @@ GAME_OVER_TIMESTAMP_HIGHLIGHT_COLOR = (180, 160, 0)  # Gold-ish for new score ti
 
 WINDOW_TITLE = "KobraPy"  # Window title.
 CLOCK_TICKS = 4  # How fast the snake moves.
+HUNGER_MAX_TIME = 10.0  # Maximum hunger time in seconds before starvation death.
 
 # Application data directory constants
 APP_NAME = "naja"  # Application name for data directory
