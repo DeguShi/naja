@@ -105,14 +105,17 @@ class BoardRenderSystem(BaseSystem):
         color_scheme = self._get_color_scheme(world)
         arena_secondary_color = color_scheme.arena_secondary.to_tuple()
 
-        # Draw secondary color tiles, for a checkerboard pattern
-        for index in range(0, board.width * board.height, 2):
-            x = (index % board.width) * cell_size
-            y = (index // board.width) * cell_size
-
-            self._renderer.draw_rect(
-                arena_secondary_color, pygame.Rect(x, y, cell_size, cell_size)
-            )
+        # Draw secondary color tiles for a checkerboard pattern
+        for y in range(board.height):
+            for x in range(board.width):
+                # Checkerboard: alternate based on (x + y) % 2
+                if (x + y) % 2 == 1:
+                    pixel_x = x * cell_size
+                    pixel_y = y * cell_size
+                    self._renderer.draw_rect(
+                        arena_secondary_color,
+                        pygame.Rect(pixel_x, pixel_y, cell_size, cell_size),
+                    )
 
     def draw_tile(
         self, x: int, y: int, tile: Tile, cell_size: int, color_scheme: ColorScheme
