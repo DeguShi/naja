@@ -28,10 +28,16 @@ This system detects collisions between the snake and:
 Follows proper ECS architecture by querying world directly.
 """
 
-from typing import Optional, Any
+from typing import Optional
 
 from ecs.systems.base_system import BaseSystem
 from ecs.world import World
+
+from ecs.systems.scoring import ScoringSystem
+from game.settings import GameSettings
+from game.services.audio_service import AudioService
+from game.game_modes_registry import GAME_MODE_TELEPORT
+from game.services.game_over_service import GameOverService
 
 
 class CollisionSystem(BaseSystem):
@@ -61,8 +67,10 @@ class CollisionSystem(BaseSystem):
 
     def __init__(
         self,
-        settings: Optional[Any] = None,
-        audio_service: Optional[Any] = None,
+        settings: Optional[GameSettings] = None,
+        audio_service: Optional[AudioService] = None,
+        scoring_system: Optional[ScoringSystem] = None,
+        game_over_service: Optional[GameOverService] = None,
     ):
         """Initialize the CollisionSystem.
 
@@ -72,6 +80,8 @@ class CollisionSystem(BaseSystem):
         """
         self._settings = settings
         self._audio_service = audio_service
+        self._scoring_system = scoring_system
+        self._game_over_service = game_over_service
 
     def update(self, world: World) -> None:
         """Check for all collision types in priority order.
@@ -87,20 +97,17 @@ class CollisionSystem(BaseSystem):
         """
         # Check wall collision first (highest priority)
         if self._check_wall_collision(world):
-            print("☠️  DEATH CAUSE: Wall collision")
-            self._handle_death(world, "wall")
+            self._handle_death(world, "Wall collision")
             return
 
         # Check self-bite collision
         if self._check_self_bite(world):
-            print("☠️  DEATH CAUSE: Self-bite collision")
-            self._handle_death(world, "self-bite")
+            self._handle_death(world, "Self-bite collision")
             return
 
         # Check obstacle collision
         if self._check_obstacle_collision(world):
-            print("☠️  DEATH CAUSE: Obstacle collision")
-            self._handle_death(world, "obstacle")
+            self._handle_death(world, "Obstacle collision")
             return
 
         # Check apple collision (doesn't kill)
@@ -121,6 +128,77 @@ class CollisionSystem(BaseSystem):
         for _, snake in snakes.items():
             return snake
         return None
+
+    def _swap_head_and_tail(self, snake) -> None:
+        """Swap snake head with tail by reversing the body chain.
+
+        This helper is called when the snake eats an apple.
+        It moves the head to the old tail position and reverses
+        the order of the body segments, so the snake continues
+        a coherent path from the other end.
+        """
+
+        if not hasattr(snake, "position") or not hasattr(snake, "body"):
+            return
+
+        position = snake.position
+        body = snake.body
+
+        if not body.segments:
+            return
+        chain = [position] + body.segments
+
+        coords = []
+        for seg in chain:
+            x = getattr(seg, "x", None)
+            y = getattr(seg, "y", None)
+            prev_x = getattr(seg, "prev_x", x)
+            prev_y = getattr(seg, "prev_y", y)
+            coords.append((x, y, prev_x, prev_y))
+
+        # Reverse
+        coords.reverse()
+
+        # apply to the head
+        head_x, head_y, head_prev_x, head_prev_y = coords[0]
+        position.x = head_x
+        position.y = head_y
+        position.prev_x = head_prev_x
+        position.prev_y = head_prev_y
+
+        # apply to the body (segments)
+        for seg, (x, y, prev_x, prev_y) in zip(body.segments, coords[1:]):
+            seg.x = x
+            seg.y = y
+            seg.prev_x = prev_x
+            seg.prev_y = prev_y
+
+        if hasattr(snake, "velocity") and body.segments:
+            first = body.segments[0]
+            dx = position.x - first.x
+            dy = position.y - first.y
+
+            # normalize
+            if dx > 0:
+                snake.velocity.dx = 1
+                snake.velocity.dy = 0
+            elif dx < 0:
+                snake.velocity.dx = -1
+                snake.velocity.dy = 0
+            elif dy > 0:
+                snake.velocity.dx = 0
+                snake.velocity.dy = 1
+            elif dy < 0:
+                snake.velocity.dx = 0
+                snake.velocity.dy = -1
+
+        # clean buffer
+        if (
+            hasattr(snake, "input_buffer")
+            and snake.input_buffer
+            and snake.input_buffer.moves
+        ):
+            snake.input_buffer.moves.clear()
 
     def _get_game_state(self, world: World):
         """Get the GameState component from world.
@@ -292,12 +370,16 @@ class CollisionSystem(BaseSystem):
                     if hasattr(snake, "body"):
                         snake.body.size += 1
 
-                    # increment score
-                    score_entities = world.registry.query_by_component("score")
-                    if score_entities:
-                        score_entity = list(score_entities.values())[0]
-                        if hasattr(score_entity, "score"):
-                            score_entity.score.current += 1
+                        if self._should_swap_head_and_tail(world):
+                            self._swap_head_and_tail(snake)
+
+                    # increment score using scoring system
+                    if self._scoring_system:
+                        # Get points from apple's edible component (default to 1)
+                        points = 1
+                        if hasattr(apple, "edible"):
+                            points = apple.edible.points
+                        self._scoring_system.on_apple_eaten(world, points)
 
                     game_state = self._get_game_state(world)
                     if game_state:
@@ -314,35 +396,88 @@ class CollisionSystem(BaseSystem):
                         new_speed = min(current_speed * 1.1, max_speed)
                         snake.velocity.speed = new_speed
 
-                    # remove eaten apple
-                    world.registry.remove(entity_id)
+                    # reset hunger timer when apple is eaten (if enabled)
+                    if self._settings and bool(self._settings.get("enable_hunger")):
+                        hunger_entities = world.registry.query_by_component("hunger")
+                        if hunger_entities:
+                            he = list(hunger_entities.values())[0]
+                            if hasattr(he, "hunger"):
+                                # Recompute hunger max_time from current snake velocity
+                                snake_for_hunger = self._get_snake_entity(world)
+                                try:
+                                    if (
+                                        snake_for_hunger
+                                        and hasattr(snake_for_hunger, "velocity")
+                                        and snake_for_hunger.velocity.speed > 0
+                                    ):
+                                        he.hunger.max_time = 50.0 / float(
+                                            snake_for_hunger.velocity.speed
+                                        )
+                                except Exception:
+                                    pass
+                                # reset current time to (possibly updated) max
+                                he.hunger.current_time = he.hunger.max_time
+
+                    # Special handling for TELEPORT mode
+                    if game_state and game_state.game_mode == GAME_MODE_TELEPORT:
+                        # Find another active apple on the board
+                        other_apple_id = None
+                        other_apple = None
+                        for other_id, other in apples.items():
+                            if other_id == entity_id:
+                                continue
+                            if hasattr(other, "position"):
+                                other_apple_id = other_id
+                                other_apple = other
+                                break
+
+                        if other_apple is not None:
+                            # Teleport snake head to the other apple's position
+                            snake.position.prev_x = snake.position.x
+                            snake.position.prev_y = snake.position.y
+                            snake.position.x = other_apple.position.x
+                            snake.position.y = other_apple.position.y
+
+                            # Keep velocity unchanged (do nothing to snake.velocity)
+
+                            # Remove both apples so AppleSpawnSystem will respawn them
+                            try:
+                                world.registry.remove(entity_id)
+                            except Exception:
+                                # ignore removal errors
+                                pass
+                            try:
+                                if other_apple_id is not None:
+                                    world.registry.remove(other_apple_id)
+                            except Exception:
+                                pass
+
+                            break  # handled teleport, only one apple per frame
+
+                    else:
+                        # remove eaten apple
+                        world.registry.remove(entity_id)
 
                     break  # only eat one apple per frame
 
     def _handle_death(self, world: World, reason: str) -> None:
         """Handle snake death.
 
-        Modifies GameState component and plays death audio.
-
-        Args:
-            world: ECS world
-            reason: Death reason message (e.g., "wall", "self-bite", "obstacle")
+        Delegates to GameOverService.
         """
-        # kill the snake
-        snake = self._get_snake_entity(world)
-        if snake and hasattr(snake, "body"):
-            snake.body.alive = False
+        if self._game_over_service:
+            self._game_over_service.handle_death(world, reason)
+        else:
+            print(f"☠️ DEATH CAUSE: {reason} (Service missing)")
 
-        # play death sound and music
-        if self._audio_service:
-            self._audio_service.play_sound("assets/sound/gameover.wav")
-            self._audio_service.play_music("assets/sound/death_song.mp3")
-
-        # update game state
+    def _should_swap_head_and_tail(self, world: World) -> bool:
+        """Determine if apple effects should swap the snake head and tail."""
         game_state = self._get_game_state(world)
-        if game_state:
-            game_state.game_over = True
-            game_state.death_reason = reason
-            game_state.next_scene = "game_over"
+        if game_state and getattr(game_state, "swap_head_tail_on_apple", False):
+            return True
 
-        print(f"GAME OVER: {reason}")
+        return (
+            self._settings
+            and hasattr(self._settings, "get")
+            and self._settings.get("swap_head_tail_on_apple")
+        )

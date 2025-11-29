@@ -48,6 +48,8 @@ from ecs.systems.obstacle_generation import ObstacleGenerationSystem
 from ecs.systems.settings_apply import SettingsApplySystem
 from game.scenes.game_modes import get_resolved_game_mode
 from game.game_modes_registry import CLASSIC_MODE_NAME
+from ecs.systems.hunger import HungerSystem
+from game.services.game_over_service import GameOverService
 
 
 class GameplayScene(BaseScene):
@@ -111,6 +113,18 @@ class GameplayScene(BaseScene):
 
         self._systems.clear()
 
+        # Create scoring system first so collision system can use it
+        scoring_system = ScoringSystem(
+            scoreboard=self._scoreboard,
+            settings=self._settings,
+            gamemode=self._current_game_mode,
+        )
+
+        # Create GameOverService
+        game_over_service = GameOverService(
+            audio_service=self._audio_service, scoring_system=scoring_system
+        )
+
         # game logic systems (indices 0-7, paused during pause)
         from ecs.systems.apple_spawn import AppleSpawnSystem
 
@@ -124,19 +138,29 @@ class GameplayScene(BaseScene):
                 ),  # 1: update entity positions based on velocity
                 MovingAppleSystem(),  # 2: move apples in modes that allow it
                 CollisionSystem(
-                    self._settings, self._audio_service
-                ),  # 3: detect collisions (wall, self-bite, obstacles, apples)
-                AppleSpawnSystem(1000),  # 4: maintain correct number of apples on board
+                    self._settings,
+                    self._audio_service,
+                    scoring_system,
+                    game_over_service,
+                ),  # 4: detect collisions (wall, self-bite, obstacles, apples)
+                AppleSpawnSystem(1000),  # 5: maintain correct number of apples on board
                 SpawnSystem(
                     1000, (255, 0, 0), None
-                ),  # 5: create new entities at valid positions
-                ScoringSystem(),  # 6: track score and high score
+                ),  # 6: create new entities at valid positions
+                ScoringSystem(),  # 7: track score and high score
+                # 8: conditionally enable HungerSystem based on game settings
+                *(
+                    [HungerSystem(game_over_service=game_over_service)]
+                    if self._settings and bool(self._settings.get("enable_hunger"))
+                    else []
+                ),
+                scoring_system,  # 7: track score and high score
                 ObstacleGenerationSystem(
                     100, 8, 2, None
-                ),  # 7: generate obstacles with connectivity guarantees
+                ),  # 9: generate obstacles with connectivity guarantees
                 SettingsApplySystem(
                     self._settings, self._config, self._assets
-                ),  # 8: apply runtime settings changes (colors, difficulty, etc)
+                ),  # 10: apply runtime settings changes (colors, difficulty, etc)
             ]
         )
 

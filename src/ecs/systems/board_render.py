@@ -104,6 +104,7 @@ class BoardRenderSystem(BaseSystem):
 
         color_scheme = self._get_color_scheme(world)
         arena_secondary_color = color_scheme.arena_secondary.to_tuple()
+        arena_secondary_color = color_scheme.arena_secondary.to_tuple()
 
         # Draw secondary color tiles for a checkerboard pattern
         for y in range(board.height):

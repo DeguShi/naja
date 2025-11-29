@@ -46,7 +46,9 @@ from typing import Optional
 
 from game.scenes.base_scene import BaseScene
 from game.services.assets import GameAssets
-from game.constants import ARENA_PRIMARY_COLOR
+from game.constants import (
+    ARENA_PRIMARY_COLOR,
+)
 
 
 class GameOverScene(BaseScene):
