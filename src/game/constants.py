@@ -5,6 +5,7 @@ before runtime and never changed
 """
 
 import random
+import platformdirs
 
 
 HEAD_COLOR = "#00aa00"  # Color of the snake's head.
