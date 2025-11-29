@@ -28,18 +28,11 @@ from ecs.systems.scoring import ScoringSystem
 
 
 @dataclass
-class ScoreComponent:
-    """Simple score component for testing."""
-
-    current: int = 0
-    high_score: int = 0
-
-
-@dataclass
 class ScoreEntity:
     """Simple score entity for testing."""
 
-    score: ScoreComponent
+    current: int = 0
+    high_score: int = 0
 
 
 @pytest.fixture
@@ -63,8 +56,7 @@ def scoring_system():
 @pytest.fixture
 def world_with_score(world):
     """Create a world with a score entity."""
-    score_component = ScoreComponent(current=0, high_score=0)
-    score_entity = ScoreEntity(score=score_component)
+    score_entity = ScoreEntity(current=0, high_score=0)
     world.registry.add(score_entity)
     return world
 
@@ -318,8 +310,7 @@ class TestScorePreservation:
         """Test that high score can be transferred between worlds."""
         # world 1 (before settings change)
         world1 = World(board)
-        score_component1 = ScoreComponent(current=0, high_score=0)
-        score_entity1 = ScoreEntity(score=score_component1)
+        score_entity1 = ScoreEntity(current=0, high_score=0)
         world1.registry.add(score_entity1)
 
         system = ScoringSystem()
@@ -330,8 +321,7 @@ class TestScorePreservation:
 
         # world 2 (after settings change)
         world2 = World(board)
-        score_component2 = ScoreComponent(current=0, high_score=high_score_before)
-        score_entity2 = ScoreEntity(score=score_component2)
+        score_entity2 = ScoreEntity(current=0, high_score=high_score_before)
         world2.registry.add(score_entity2)
 
         # high score should be preserved
